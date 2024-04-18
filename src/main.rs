@@ -1,7 +1,21 @@
+use std::path::Path;
+use std::fs::File;
+use std::io::prelude::*;
+
+use std::time;
+use std::thread::sleep;
+
 use emu8080::Intel8080;
 use emu8080::MemoryAccess;
+use emu8080::CYCLE_TIME;
 
 #[allow(non_camel_case_types)]
+
+const SCREEN_REFRESH_RATE_HZ: u64 = 60;
+const SCREEN_WIDTH_PIXELS: u64 = 256;
+const SCREEN_HEIGHT_PIXELS: u64 = 224;
+
+const CYCLE_TIME_NANO_SEC: u64 = (emu8080::CYCLE_TIME * 10e9) as u64;
 
 enum InputPorts {
     INP0 = 0,
@@ -66,16 +80,50 @@ impl MemoryAccess for SpaceInvadersMemory {
 }
 
 impl SpaceInvadersMemory {
-    fn new() -> Self {
-        return SpaceInvadersMemory { 
-            rom: [0 as u8; ROM_SIZE],
+    fn new(rom: [u8; ROM_SIZE]) -> Self {
+        let ret = SpaceInvadersMemory { 
+            rom,
             ram: [0 as u8; RAM_SIZE],
             vram: [0 as u8; VRAM_SIZE]
-        }
+        };
+
+        return ret;
     }
 }
 
-fn main() {
-    let cpu = Intel8080::new();
-    let memory = SpaceInvadersMemory::new();
+fn load_rom(file_path: &Path) -> Result<[u8; ROM_SIZE], std::io::Error> {
+    let mut file = match File::open(&file_path) {
+        Ok(file) => file,
+        Err(e) => return Err(e)
+    };
+    
+    let mut buffer = [0 as u8; ROM_SIZE];
+    match file.read(&mut buffer) {
+        Ok(_) => { },
+        Err(e) => return Err(e),
+    }
+    return Ok(buffer);
+}
+
+fn main() -> Result<(), std::io::Error> {
+    let mut cpu = Intel8080::new();
+    let rom = match load_rom(Path::new("test")) {
+        Ok(rom) => rom,
+        Err(e) => return Err(e)
+    };
+    let mut memory = SpaceInvadersMemory::new(rom);
+    let mut time: u64 = 0;
+
+    loop {
+        let now = std::time::Instant::now();
+        let cpu_cycles = cpu.step(&mut memory);
+        
+        let cpu_time_nano_sec: u64 = (cpu_cycles as u64) * CYCLE_TIME_NANO_SEC;
+        let cpu_time = std::time::Duration::from_nanos(cpu_time_nano_sec);
+        let exec_time = now.elapsed();
+        
+        std::thread::sleep(cpu_time - exec_time);
+    }
+
+    // return Ok(());
 }
