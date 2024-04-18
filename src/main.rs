@@ -7,15 +7,13 @@ use std::thread::sleep;
 
 use emu8080::Intel8080;
 use emu8080::MemoryAccess;
-use emu8080::CYCLE_TIME;
+use emu8080::CYCLE_TIME_NANO_SECS;
 
 #[allow(non_camel_case_types)]
 
 const SCREEN_REFRESH_RATE_HZ: u64 = 60;
 const SCREEN_WIDTH_PIXELS: u64 = 256;
 const SCREEN_HEIGHT_PIXELS: u64 = 224;
-
-const CYCLE_TIME_NANO_SEC: u64 = (emu8080::CYCLE_TIME * 10e9) as u64;
 
 enum InputPorts {
     INP0 = 0,
@@ -118,7 +116,7 @@ fn main() -> Result<(), std::io::Error> {
         let now = std::time::Instant::now();
         let cpu_cycles = cpu.step(&mut memory);
         
-        let cpu_time_nano_sec: u64 = (cpu_cycles as u64) * CYCLE_TIME_NANO_SEC;
+        let cpu_time_nano_sec: u64 = cpu_cycles * CYCLE_TIME_NANO_SECS;
         let cpu_time = std::time::Duration::from_nanos(cpu_time_nano_sec);
         let exec_time = now.elapsed();
         
