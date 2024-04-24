@@ -89,6 +89,34 @@ impl SpaceInvadersMemory {
     }
 }
 
+struct ShiftRegister {
+    register: u16,
+    amount: u8,
+}
+
+impl ShiftRegister {
+    fn new() -> Self {
+        ShiftRegister {
+            register: 0,
+            amount: 0
+        }
+    }
+
+    fn input_data(&mut self, input: u8) {
+        self.register = ((input as u16) << 8) | (self.register >> 8);
+    }
+
+    fn input_amount(&mut self, amount: u8) {
+        self.amount = amount & 0b00000111;
+    }
+
+    fn output(&self) -> u8 {
+        let ret = self.register & (0xFF << (8 - self.amount));
+        let ret = ret >> self.amount + 8;
+        ret as u8
+    }
+}
+
 fn load_rom(file_path: &Path) -> Result<[u8; ROM_SIZE], std::io::Error> {
     let mut file = match File::open(&file_path) {
         Ok(file) => file,
@@ -104,22 +132,49 @@ fn load_rom(file_path: &Path) -> Result<[u8; ROM_SIZE], std::io::Error> {
 }
 
 fn main() -> Result<(), std::io::Error> {
+    println!( "{:#02x}", 0xFF << 7 );
     let mut cpu = Intel8080::new();
     let rom = match load_rom(Path::new("test")) {
         Ok(rom) => rom,
         Err(e) => return Err(e)
     };
     let mut memory = SpaceInvadersMemory::new(rom);
+    let mut shift_register = ShiftRegister::new();
     let mut time: u64 = 0;
+
+    let mut input_1: u8 = 0b00001000;
+    let mut input_2: u8 = 0b00000000;
 
     loop {
         let now = std::time::Instant::now();
         let cpu_cycles = cpu.step(&mut memory);
-        
+
+        if cpu.output_ready() {
+            let output = cpu.read_output();
+            match cpu.active_io_port() {
+                2 => { shift_register.input_amount(output) }, // shift amount
+                3 => {}, // sound bits
+                4 => { shift_register.input_data(output) }, // shift data
+                5 => {}, // sound bits
+                6 => {}, // watch dog
+                _ => {}
+            }
+        }
+        else if cpu.awaiting_input() {
+            let input: u8 = match cpu.active_io_port() {
+                1 => { input_1 }, // INPUTS 1
+                2 => { input_2 }, // INPUTS 2
+                3 => { shift_register.output() }, // bit shift in
+                _ => { 0 }
+            };
+
+            cpu.write_input(input);
+        }
+
         let cpu_time_nano_sec: u64 = cpu_cycles * CYCLE_TIME_NANO_SECS;
         let cpu_time = std::time::Duration::from_nanos(cpu_time_nano_sec);
         let exec_time = now.elapsed();
-        
+
         std::thread::sleep(cpu_time - exec_time);
     }
 
