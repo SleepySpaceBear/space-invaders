@@ -133,13 +133,16 @@ fn load_rom(file_path: &Path) -> Result<[u8; ROM_SIZE], std::io::Error> {
 
 fn main() -> Result<(), std::io::Error> {
     println!( "{:#02x}", 0xFF << 7 );
+    
     let mut cpu = Intel8080::new();
     let rom = match load_rom(Path::new("test")) {
         Ok(rom) => rom,
         Err(e) => return Err(e)
     };
+
     let mut memory = SpaceInvadersMemory::new(rom);
     let mut shift_register = ShiftRegister::new();
+    
     let mut time: u64 = 0;
 
     let mut input_1: u8 = 0b00001000;
@@ -171,11 +174,13 @@ fn main() -> Result<(), std::io::Error> {
             cpu.write_input(input);
         }
 
-        let cpu_time_nano_sec: u64 = cpu_cycles * CYCLE_TIME_NANO_SECS;
-        let cpu_time = std::time::Duration::from_nanos(cpu_time_nano_sec);
+        // draw screen + set interrupts if needed
+
+        let emu_time_nano_sec: u64 = cpu_cycles * CYCLE_TIME_NANO_SECS;
+        let emu_time = std::time::Duration::from_nanos(emu_time_nano_sec);
         let exec_time = now.elapsed();
 
-        std::thread::sleep(cpu_time - exec_time);
+        std::thread::sleep(emu_time - exec_time);
     }
 
     // return Ok(());
