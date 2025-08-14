@@ -1,9 +1,17 @@
 use std::path::Path;
 use std::fs::File;
 use std::io::prelude::*;
+use std::error::Error;
 
-use std::time;
-use std::thread::sleep;
+use log::{info, debug, warn};
+
+use pixels::{SurfaceTexture, Pixels};
+
+use winit::dpi::LogicalSize;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{ControlFlow, EventLoop};
+use winit::window::WindowBuilder;
+use winit_input_helper::WinitInputHelper;
 
 use emu8080::Intel8080;
 use emu8080::MemoryAccess;
@@ -11,24 +19,14 @@ use emu8080::CYCLE_TIME_NANO_SECS;
 
 #[allow(non_camel_case_types)]
 
-const SCREEN_REFRESH_RATE_HZ: u64 = 60;
-const SCREEN_WIDTH_PIXELS: u64 = 256;
-const SCREEN_HEIGHT_PIXELS: u64 = 224;
+const SCREEN_REFRESH_RATE_HZ: usize = 60;
+const SCREEN_WIDTH_PIXELS: usize = 256;
+const SCREEN_HEIGHT_PIXELS: usize = 224;
 
-enum InputPorts {
-    INP0 = 0,
-    INP1 = 1,
-    INP2 = 2,
-    SHFT_IN = 3
-}
+const SCREEN_SIZE_PIXELS: usize = SCREEN_WIDTH_PIXELS * SCREEN_HEIGHT_PIXELS; 
+const FRAME_BUFFER_SIZE: usize = SCREEN_SIZE_PIXELS * 4;
 
-enum OutputPorts {
-    SHFTAMNT = 2,
-    SOUND1 = 3,
-    SHFT_DATA = 4,
-    SOUND2 = 5,
-    WATCHDOG = 6
-}
+const DISPLAY_TIME_NANO_SEC: u64 = 16_666_667;
 
 const ROM_SIZE: usize = 0x2000;
 const RAM_SIZE: usize = 0x400;
@@ -42,6 +40,8 @@ const ROM_END: usize = ROM_START + ROM_SIZE;
 const RAM_END: usize = RAM_START + RAM_SIZE;
 const VRAM_END: usize = VRAM_START + VRAM_SIZE;
 
+const RAM_MASK: usize = 0x3FFF;
+
 struct SpaceInvadersMemory {
     rom: [u8; ROM_SIZE],
     ram: [u8; RAM_SIZE],
@@ -50,7 +50,7 @@ struct SpaceInvadersMemory {
 
 impl MemoryAccess for SpaceInvadersMemory {
     fn read_byte(&self, addr: u16) -> u8 {
-        let addr: usize = addr as usize;
+        let addr: usize = addr as usize & RAM_MASK;
 
         if addr < ROM_END {
             return self.rom[addr];
@@ -61,19 +61,63 @@ impl MemoryAccess for SpaceInvadersMemory {
         else if addr < VRAM_END {
             return self.vram[addr - VRAM_START];
         }
-        
+
         return 0;
     }
 
     fn write_byte(&mut self, addr: u16, val: u8) {
-        let addr: usize = addr as usize; 
+        let addr: usize = addr as usize & RAM_MASK; 
+
         if RAM_START <= addr && addr < RAM_END {
-            self.ram[addr - 0x2000] = val;
+            self.ram[addr - RAM_START] = val;
         }
         else if VRAM_START <= addr && addr < VRAM_END {
-            self.vram[addr - 0x2400] = val;
+            self.vram[addr - VRAM_START] = val;
         }
 
+    }
+
+    fn read_bytes(&self, addr: u16, count: u16) -> &[u8] {
+        let addr: usize = addr as usize & RAM_MASK;
+    
+        if addr < ROM_END {
+            let start = addr;
+            let end = start + count as usize;
+            return &self.rom[start..end]
+        }
+        else if RAM_START <= addr && addr < RAM_END {
+            let start = addr - RAM_START;
+            let end = start + count as usize;
+            return &self.ram[start..end]
+
+        }
+        else if VRAM_START <= addr && VRAM_END <= addr {
+            let start = addr - VRAM_START;
+            let end = start + count as usize;
+            return &self.vram[start..end];
+        }
+
+        return &[]
+    }
+
+    fn write_bytes(&mut self, addr: u16, val: &[u8]) {
+        let addr: usize = addr as usize & RAM_MASK;
+        if addr < ROM_END {
+            let start = addr;
+            let end = start + val.len();
+            self.rom[start..end].copy_from_slice(val);
+        }
+        else if RAM_START <= addr && addr < RAM_END {
+            let start = addr - RAM_START;
+            let end = start + val.len();
+            self.ram[start..end].copy_from_slice(val);
+
+        }
+        else if VRAM_START <= addr && VRAM_END <= addr {
+            let start = addr as usize;
+            let end = start + val.len() as usize;
+            self.vram[start..end].copy_from_slice(val);
+        }
     }
 }
 
@@ -111,9 +155,7 @@ impl ShiftRegister {
     }
 
     fn output(&self) -> u8 {
-        let ret = self.register & (0xFF << (8 - self.amount));
-        let ret = ret >> self.amount + 8;
-        ret as u8
+        (self.register >> (8 - self.amount)) as u8
     }
 }
 
@@ -131,24 +173,85 @@ fn load_rom(file_path: &Path) -> Result<[u8; ROM_SIZE], std::io::Error> {
     return Ok(buffer);
 }
 
-fn main() -> Result<(), std::io::Error> {
-    println!( "{:#02x}", 0xFF << 7 );
+fn convert_framebuffer(vram: &[u8; VRAM_SIZE], frame_buffer: &mut [u8]) {
+    let width = SCREEN_HEIGHT_PIXELS;
+    let height = SCREEN_WIDTH_PIXELS;
     
+    let pixel_size = 4;
+    let mut byte_dst: usize = (height - 1) * width * pixel_size;
+    let mut pixel_index: usize = 0;
+
+    for val in vram.iter() {
+        let mut mask: u8 = 0x01;
+
+        for _ in 0..8 {
+            let color: u8 = if mask & val != 0 {0xFF} else {0x00};
+            
+            for i in 0..pixel_size {
+                frame_buffer[byte_dst + i] = color;
+            }
+
+            pixel_index += 1;
+            if pixel_index % height == 0 {
+                byte_dst = (((height - 1) * width) + (pixel_index / height)) * pixel_size;
+            }
+            else {
+                byte_dst -= width * pixel_size;
+            }
+            mask <<= 1;
+        }
+    
+    }
+}
+
+
+fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let mut cpu = Intel8080::new();
-    let rom = match load_rom(Path::new("test")) {
+    let rom = match load_rom(Path::new("src/assets/invaders.bin")) {
         Ok(rom) => rom,
-        Err(e) => return Err(e)
+        Err(e) => return Err(Box::new(e))
     };
 
     let mut memory = SpaceInvadersMemory::new(rom);
     let mut shift_register = ShiftRegister::new();
     
-    let mut time: u64 = 0;
+    let mut emu_clock: u64 = 0;
+    let mut next_display_time: u64 = 0;
+    let mut next_screen_int_time: u64 = 7_142_857;
 
     let mut input_1: u8 = 0b00001000;
     let mut input_2: u8 = 0b00000000;
 
-    loop {
+    let event_loop = EventLoop::new();
+    let mut input = WinitInputHelper::new();
+    let window = {
+        let size = LogicalSize::new(SCREEN_HEIGHT_PIXELS as f64, SCREEN_WIDTH_PIXELS as f64);
+        WindowBuilder::new()
+            .with_title("Space Invaders")
+            .with_inner_size(size)
+            .with_min_inner_size(size)
+            .build(&event_loop)
+            .unwrap()
+    };
+
+    let mut rendered_pixels = {
+        let window_size = window.inner_size();
+        let surface_texture = SurfaceTexture::new(window_size.width, window_size.height, &window);
+        Pixels::new(SCREEN_HEIGHT_PIXELS as u32, SCREEN_WIDTH_PIXELS as u32, surface_texture)?
+    };
+    
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
+        
+        if let Event::RedrawRequested(_) = event {
+            if let Err(_) = rendered_pixels.render() {
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+        }
+
         let now = std::time::Instant::now();
         let cpu_cycles = cpu.step(&mut memory);
 
@@ -159,7 +262,7 @@ fn main() -> Result<(), std::io::Error> {
                 3 => {}, // sound bits
                 4 => { shift_register.input_data(output) }, // shift data
                 5 => {}, // sound bits
-                6 => {}, // watch dog
+                6 => { /* do nothing */ }, // watch dog
                 _ => {}
             }
         }
@@ -180,8 +283,56 @@ fn main() -> Result<(), std::io::Error> {
         let emu_time = std::time::Duration::from_nanos(emu_time_nano_sec);
         let exec_time = now.elapsed();
 
-        std::thread::sleep(emu_time - exec_time);
-    }
+        emu_clock = emu_clock.wrapping_add(emu_time_nano_sec);
 
-    // return Ok(());
+        if next_display_time <= emu_clock {
+            next_display_time = next_display_time.wrapping_add(DISPLAY_TIME_NANO_SEC);
+            cpu.interrupt(emu8080::Instruction::RST_3);
+            
+            convert_framebuffer(&memory.vram, &mut rendered_pixels.frame_mut());
+            window.request_redraw();
+        }
+
+        if next_screen_int_time <= emu_clock {
+            next_screen_int_time = next_screen_int_time.wrapping_add(DISPLAY_TIME_NANO_SEC);
+            cpu.interrupt(emu8080::Instruction::RST_2);
+        }
+
+        if emu_time > exec_time {
+             std::thread::sleep(emu_time - exec_time);
+        }
+        else {
+            warn!("Failed to meet cycle time - Emulator: {emu_time:?}, Execution: {exec_time:?}");
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ShiftRegister;
+
+    #[test]
+    fn test_shift_register() {
+        let mut sr = ShiftRegister::new();
+        assert_eq!(sr.amount, 0);
+        assert_eq!(sr.register, 0);
+
+        sr.input_data(0xAA);
+        assert_eq!(sr.register, 0xAA00);
+
+        sr.input_data(0xFF); // 0b11111111
+        assert_eq!(sr.register, 0xFFAA);
+
+        sr.input_data(0x12); // 0b00010010
+        assert_eq!(sr.register, 0x12FF);
+
+        sr.input_amount(0);
+        assert_eq!(sr.output(), 0x12); 
+
+        sr.input_amount(2);
+        assert_eq!(sr.output(), 0b01001011);
+        
+        sr.input_amount(7);
+        assert_eq!(sr.output(), 0b01111111);
+    }
 }
