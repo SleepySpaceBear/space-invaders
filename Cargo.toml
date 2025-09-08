@@ -3,15 +3,21 @@ name = "space-invaders"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
 
 [dependencies]
 # rppal = { git = "https://github.com/golemparts/rppal.git", branch = "master" }
 # emu8080 = { git = "https://github.com/SleepySpaceBear/emu8080.git", branch = "main" }
 emu8080 = { path = "../emu8080" }
-pixels = "0.13.0"
-winit = "0.28"
-winit_input_helper = "0.14"
+pixels = "0.15"
+winit = { version = "0.30.12", features = ["wayland"] }
 
 log = "0.4"
 env_logger = "0.11"
+
+modular-bitfield = { version = "0.12" }
