@@ -150,15 +150,10 @@ impl SpaceInvadersMemory {
         // the screen is rotated 90 degrees counter-clockwise
         // so pixel address 0 is at (FRAME_HEIGHT, 0) or FRAME_HEIGHT * FRAME_WIDTH * PIXEL_DEPTH
         // pixel address 1 is at (1, FRAME_HEIGHT) or FRAME_HEIGHT * (FRAME_WIDTH - 1) * PIXEL_DEPTH
-        let starting_pixel_address: usize = 8 * address as usize;
-        let starting_pixel_display_col: usize = starting_pixel_address / SCREEN_WIDTH_PIXELS;
-        let starting_pixel_display_row: usize =
-            SCREEN_WIDTH_PIXELS - 1 - (starting_pixel_address % SCREEN_WIDTH_PIXELS);
+        let starting_pixel_address: usize = self.get_display_pixel_address(address, 0);
 
         for i in 0..8 {
-            let pixel_display_row: usize = starting_pixel_display_row - i;
-            let pixel_display_address =
-                pixel_display_row * DISPLAY_WIDTH_PIXELS as usize + starting_pixel_display_col;
+            let pixel_display_address = starting_pixel_address - (i * DISPLAY_WIDTH_PIXELS);
             let byte_address = pixel_display_address * DISPLAY_PIXEL_SIZE;
 
             let mask: u8 = 0x1 << i;
