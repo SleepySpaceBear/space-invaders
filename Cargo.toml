@@ -11,9 +11,7 @@ overflow-checks = false
 lto = true
 
 [dependencies]
-# rppal = { git = "https://github.com/golemparts/rppal.git", branch = "master" }
-# emu8080 = { git = "https://github.com/SleepySpaceBear/emu8080.git", branch = "main" }
-emu8080 = { path = "../emu8080" }
+emu8080 = { git = "https://github.com/SleepySpaceBear/emu8080.git", branch = "main" }
 pixels = "0.15"
 winit = { version = "0.30.12", features = ["wayland"] }
 
