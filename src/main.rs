@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::error::Error;
 use std::fs::File;
 use std::io::prelude::*;
@@ -8,7 +10,7 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 
 use modular_bitfield::prelude::*;
 
@@ -197,8 +199,8 @@ impl SpaceInvadersMemory {
 #[bitfield]
 struct SpaceInvadersInput0 {
     dip_4: bool,
-    #[skip(setters)]
-    always_one: B3,
+    #[skip]
+    __: B3,
     fire: bool,
     left: bool,
     right: bool,
@@ -238,6 +240,7 @@ struct SpaceInvadersInput2 {
 
 #[bitfield]
 #[derive(Debug)]
+#[allow(dead_code)]
 struct SpaceInvadersAudioOutput1 {
     #[skip(setters)]
     ufo: bool,
@@ -257,6 +260,7 @@ struct SpaceInvadersAudioOutput1 {
 
 #[bitfield]
 #[derive(Debug)]
+#[allow(dead_code)]
 struct SpaceInvadersAudioOutput2 {
     #[skip(setters)]
     fleet_movement_1: bool,
@@ -582,7 +586,7 @@ impl winit::application::ApplicationHandler for SpaceInvaders<'_> {
 
     fn window_event(
         &mut self,
-        _event_loop: &winit::event_loop::ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
@@ -597,6 +601,16 @@ impl winit::application::ApplicationHandler for SpaceInvaders<'_> {
                     }
                 }
             }
+            WindowEvent::CloseRequested => {
+                self.running
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                if let Some(thread) = self.emulator_thread.take() {
+                    if let Err(e) = thread.join() {
+                        warn!("Error joining thread: {:?}", e);
+                    }
+                }
+                event_loop.exit();
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -605,81 +619,102 @@ impl winit::application::ApplicationHandler for SpaceInvaders<'_> {
                         ..
                     },
                 ..
-            } => match key.as_ref() {
-                Key::Named(NamedKey::ArrowRight) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
+            } => {
+                debug!("{:?} key pressed", key);
+                match key.as_ref() {
+                    Key::Named(NamedKey::ArrowRight) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
 
-                    val.set_p1_right(true);
+                        val.set_p1_right(true);
 
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p1_left(true);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p1_shot(true);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("c") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_credit(true);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("1") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_start_1p(true);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("2") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_start_2p(true);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("w") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_shot(true);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("a") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_left(true);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("d") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_right(true);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    _ => {}
                 }
-                Key::Named(NamedKey::ArrowLeft) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_p1_left(true);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Named(NamedKey::ArrowUp) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_p1_shot(true);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("c") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_credit(true);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("1") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_start_1p(true);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("2") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_start_2p(true);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("w") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_shot(true);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("a") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_left(true);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("d") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_right(true);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                _ => {}
-            },
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -688,81 +723,101 @@ impl winit::application::ApplicationHandler for SpaceInvaders<'_> {
                         ..
                     },
                 ..
-            } => match key.as_ref() {
-                Key::Named(NamedKey::ArrowRight) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
+            } => {
+                debug!("{:?} key released", key);
+                match key.as_ref() {
+                    Key::Named(NamedKey::ArrowRight) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+                        val.set_p1_right(false);
 
-                    val.set_p1_right(false);
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
 
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                        val.set_p1_left(false);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Named(NamedKey::ArrowUp) => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p1_shot(false);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("c") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_credit(false);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("1") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_start_1p(false);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("2") => {
+                        let mut val = SpaceInvadersInput1::from_bytes([self
+                            .inputs
+                            .1
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_start_2p(false);
+
+                        self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("w") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_shot(false);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("a") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_left(false);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    Key::Character("d") => {
+                        let mut val = SpaceInvadersInput2::from_bytes([self
+                            .inputs
+                            .2
+                            .load(Ordering::Relaxed)]);
+
+                        val.set_p2_right(false);
+
+                        self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
+                    }
+                    _ => {}
                 }
-                Key::Named(NamedKey::ArrowLeft) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_p1_left(false);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Named(NamedKey::ArrowUp) => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_p1_shot(false);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("c") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_credit(false);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("1") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_start_1p(false);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("2") => {
-                    let mut val =
-                        SpaceInvadersInput1::from_bytes([self.inputs.1.load(Ordering::Relaxed)]);
-
-                    val.set_start_2p(false);
-
-                    self.inputs.1.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("w") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_shot(false);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("a") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_left(false);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                Key::Character("d") => {
-                    let mut val =
-                        SpaceInvadersInput2::from_bytes([self.inputs.2.load(Ordering::Relaxed)]);
-
-                    val.set_p2_right(false);
-
-                    self.inputs.2.store(val.into_bytes()[0], Ordering::Relaxed);
-                }
-                _ => {}
-            },
+            }
             _ => {}
         }
     }
